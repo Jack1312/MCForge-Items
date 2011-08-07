@@ -16,261 +16,239 @@
 	permissions and limitations under the Licenses.
 */
 		
+// Created by Techjar
 using System;
-using System.Threading;
-using System.Collections;
-using System.Security.Cryptography;
+using System.Collections.Generic;
 
 namespace MCForge
 {
-    public class CmdMaze : Command
-    {
-        public override string name { get { return "maze"; } }
-        public override string shortcut { get { return ""; } }
-        public override string type { get { return "other"; } }
-        public override bool museumUsable { get { return false; } }
-        public override LevelPermission defaultRank { get { return LevelPermission.AdvBuilder; } }
-        public static int randomizer = 0;
-        public static bool[,] wall;
-        public override void Use(Player p, string message)
-        {
-            String[] split = message.Split(' ');
-            if (split.Length >= 1&&message.Length>0)
-            {
-                try
-                {
-                    randomizer = int.Parse(split[0]);
-                }
-                catch (Exception)
-                {
-                    this.Help(p); return;
-                }
-            }
-            Player.SendMessage(p, "Place two blocks to determine the edges");
+   public class CmdMaze : Command
+   {
+      public override string name { get { return "maze"; } }
+      public override string shortcut { get { return ""; } }
+      public override string type { get { return "build"; } }
+      public override bool museumUsable { get { return false; } }
+      public override LevelPermission defaultRank { get { return LevelPermission.AdvBuilder; } }
+      public override void Use(Player p, string message)
+      {
+         int number = message.Split(' ').Length;
+         if (number > 3 || number < 2) { Help(p); return; }
+         if (number == 3)
+         {
+            string[] m = message.Split(' ');
+            string w = m[0].ToLower();
+            string h = m[1].ToLower();
+            string t = m[2].ToLower();
+            byte type = Block.Byte(t);
+            if (type == 255) { Player.SendMessage(p, "There is no block \"" + t + "\"."); return; }
+            if (!Block.canPlace(p, type)) { Player.SendMessage(p, "Cannot place that."); return; }
+
+            CatchPos cpos; cpos.type = type;
+            cpos.w = Convert.ToUInt16(w); cpos.h = Convert.ToUInt16(h); p.blockchangeObject = cpos;
+         }
+         else
+         {
+            string[] m = message.Split(' ');
+            string w = m[0].ToLower();
+            string h = m[1].ToLower();
             
-            p.Blockchange += new Player.BlockchangeEventHandler(Blockchange1);
-        }
-        public void Blockchange1(Player p, ushort x, ushort y, ushort z, byte type)
-        {
-            p.ClearBlockchange();
-            byte b = p.level.GetTile(x, y, z);
-            p.SendBlockchange(x, y, z, b);
-            p.blockchangeObject = new CatchPos(x, y, z);
-            p.Blockchange += new Player.BlockchangeEventHandler(Blockchange2);
-        }
-        public void Blockchange2(Player p, ushort x, ushort y, ushort z, byte type)
-        {
-            p.ClearBlockchange();
-            byte b = p.level.GetTile(x, y, z);
-            p.SendBlockchange(x, y, z, b);
-            Player.SendMessage(p, "Generating maze... this could take a while");
-            CatchPos first = (CatchPos)p.blockchangeObject;
-            int width = Math.Max(x, first.X) - Math.Min(x, first.X);
-            if (width % 2 != 0) { width++;x--; }
-            width -= 2;
-            int height = Math.Max(z, first.Z) - Math.Min(z, first.Z);
-            if (height % 2 != 0) { height++;z--; }
-            height -= 2;
-            //substract 2 cause we will just make the inner. the outer wall is made seperately
-            wall = new bool[width+1, height+1];//+1 cause we begin at 0 so we need one object more
-            for (int w = 0; w <= width; w++)
-            {
-                for (int h = 0; h <= height; h++)
-                {
-                    wall[w, h] = true;
-                }
-            }
-            GridNode.maxX = width;
-            GridNode.maxY = height;
-            //Make a Stack
-            Stack s = new Stack(width * height);
-            //Random rand = new Random(DateTime.Now.Millisecond);//ha yeah randomized :P
-            //lets begin in the lower left corner eh?(0,0)
-            s.Push(new GridNode(0, 0));
-            wall[0, 0] = false;
-            while (true)
-            {
-                GridNode node = (GridNode)s.Peek();
-                if (node.turnsPossible())
-                {
-                    GridNode[] nodearray = node.getRandomNext();
-                    wall[nodearray[0].X, nodearray[0].Y] = false;
-                    wall[nodearray[1].X, nodearray[1].Y] = false;
-                    s.Push(nodearray[1]);
-                    //we get the next two nodes
-                    //the first is a middle node from which there shouldnt start a new corridor
-                    //the second is added to the stack. next try will be with this node
-                    //i hope this will work this time...
-                }
-                else
-                {
-                    s.Pop();//if this node is a dead and it will be removed
-                }
+            CatchPos cpos; unchecked { cpos.type = (byte)-1; }
+            cpos.w = Convert.ToUInt16(w); cpos.h = Convert.ToUInt16(h); p.blockchangeObject = cpos;
+         }
+         Player.SendMessage(p, "Place a block in the corner of where you want the maze.");
+         p.ClearBlockchange();
+         p.Blockchange += new Player.BlockchangeEventHandler(Blockchange1);
+      }
+      public override void Help(Player p)
+      {
+         Player.SendMessage(p, "/maze [width] [height] <type> - generate a random maze.");
+         Player.SendMessage(p, "Note that the specified dimensions are how the algorithm sees it, the actual dimensions will be twice as large.");
+      }
+      
+      public void Blockchange1(Player p, ushort x, ushort y, ushort z, byte type)
+      {
+         p.ClearBlockchange();
+         byte b = p.level.GetTile(x, y, z);
+         p.SendBlockchange(x, y, z, b);
+         CatchPos cpos = (CatchPos)p.blockchangeObject;
+         unchecked { if (cpos.type != (byte)-1) type = cpos.type; else type = p.bindings[type]; }
+         List<Pos> buffer = new List<Pos>();
+         Random rand = new Random();
+         int rnum = 0;
 
-                if (s.Count < 1)
-                {
-                    break;//if no nodes are free anymore we will end the generation here
-                }
-            }
-            Player.SendMessage(p, "Maze is generated. now painting...");
-            //seems to be there are no more moves possible
-            //paint that shit :P
-            ushort minx = Math.Min(x, first.X);
-            ushort minz = Math.Min(z, first.Z);
-            ushort maxx = Math.Max(x, first.X);
-            maxx++;
-            ushort maxz = Math.Max(z, first.Z);
-            maxz++;
-            for (ushort xx = 0; xx <= width; xx++)
-            {
-                for (ushort zz = 0; zz <= height; zz++)
-                {
-                    if (wall[xx, zz])
-                    {
-                        p.level.Blockchange(p, (ushort)(xx + minx+1), y, (ushort)(zz + minz+1), Block.staircasefull);
-                        p.level.Blockchange(p, (ushort)(xx + minx+1), (ushort)(y + 1), (ushort)(zz + minz+1), Block.leaf);
-                        p.level.Blockchange(p, (ushort)(xx + minx+1), (ushort)(y + 2), (ushort)(zz + minz+1), Block.leaf);
-                    }
-                }
-            }
-            p.ignorePermission = true;
-            Command.all.Find("cuboid").Use(p, "walls");
-            p.manualChange(minx, y, minz, 0, Block.staircasefull);
-            p.manualChange(maxx, y, maxz, 0, Block.staircasefull);
-            Command.all.Find("cuboid").Use(p, "walls");
-            p.manualChange(minx, (ushort)(y + 1), minz, 0, Block.leaf);
-            p.manualChange(maxx, (ushort)(y + 2), maxz, 0, Block.leaf);
-            Player.SendMessage(p, "Maze painted. Build your entrance and exit yourself");
-            randomizer = 0;
-        }
-        public override void Help(Player p)
-        {
-            Player.SendMessage(p, "/maze: generates a maze");
-        }
-        private class CatchPos
-        {
-            public ushort X;
-            public ushort Y;
-            public ushort Z;
-            //public byte type;
+         //ushort xx; ushort yy; ushort zz;
+         List<ushort> stack = new List<ushort>();
+         bool[] visited = new bool[cpos.w * cpos.h * 2];
+         bool[] noWallLeft = new bool[cpos.w * cpos.h * 2];
+         bool[] noWallAbove = new bool[cpos.w * cpos.h * 2];
 
-            public CatchPos(ushort x, ushort y, ushort z)
-            {
-                this.X = x;
-                this.Y = y;
-                this.Z = z;
-            }
-        }
+         stack.Add(id(0, 0, cpos));
 
-        private class GridNode
-        {
-            public static int maxX = 0;
-            public static int maxY = 0;
-            public ushort X;
-            public ushort Y;
-            private Random rand2 = new Random(Environment.TickCount);
-            public GridNode[] getRandomNext()
-            {
-                byte[] r = new byte[1];
-                switch (randomizer)
-                {
-                    case 0:
-                        RNGCryptoServiceProvider rand = new RNGCryptoServiceProvider();
-                        rand.GetBytes(r);
-                        r[0] /= (255 / 4);
-                        break;
-                    case 1:
-                        r[0] = (byte)rand2.Next(4);
-                        break;
-                    default:
-                        Random rand3 = new Random(Environment.TickCount);
-                        r[0] = (byte)rand2.Next(4);
-                        break;
-                }
-                ushort rx = 0, ry = 0, rx2 = 0, ry2 = 0;
-                    switch (r[0])
-                    {
-                        case 0:
-                            if (isWall(X, Y + 2))
-                            {
-                                //go up
-                                rx = X;
-                                rx2 = X;
-                                ry = (ushort)(Y + 1);
-                                ry2 = (ushort)(Y + 2);
-                            }
-                            else
-                            {
-                                return this.getRandomNext();
-                            }
-                            break;
-                        case 1:
-                            if (isWall(X, Y - 2))
-                            {
-                                //go down
-                                rx = X;
-                                rx2 = X;
-                                ry = (ushort)(Y - 1);
-                                ry2 = (ushort)(Y - 2);
-                            }
-                            else
-                            {
-                                return this.getRandomNext();
-                            }
-                            break;
-                        case 2:
-                            if (isWall(X + 2, Y))
-                            {
-                                //go right
-                                rx = (ushort)(X + 1);
-                                rx2 = (ushort)(X + 2);
-                                ry = Y;
-                                ry2 = Y;
-                            }
-                            else
-                            {
-                                return this.getRandomNext();
-                            }
-                            break;
-                        case 3:
-                            if (isWall(X - 2, Y))
-                            {
-                                //go left
-                                rx = (ushort)(X - 1);
-                                rx2 = (ushort)(X - 2);
-                                ry = Y;
-                                ry2 = Y;
-                            }
-                            else
-                            {
-                                return this.getRandomNext();
-                            }
-                            break;
-                    }
-                return new GridNode[] { new GridNode(rx, ry), new GridNode(rx2, ry2) };
+         while (stack.Count > 0) {
+            ushort cell = pop(stack);
+            ushort xx = dx(cell, cpos), yy = dy(cell, cpos);
+            visited[cell] = true;
+            
+            List<ushort> neighbors = new List<ushort>();
+            if (xx > 0) neighbors.Add(id(xx - 1, yy, cpos));
+            if (xx < cpos.w - 1) neighbors.Add(id(xx + 1, yy, cpos));
+            if (yy > 0) neighbors.Add(id(xx, yy - 1, cpos));
+            if (yy < cpos.h - 1) neighbors.Add(id(xx, yy + 1, cpos));
+            
+            //shuffle(neighbors);
+            
+            while (neighbors.Count > 0) {
+               rnum = rand.Next(neighbors.Count);
+               ushort neighbor = neighbors[rnum]; neighbors.RemoveAt(rnum);
+               ushort nx = dx(neighbor, cpos), ny = dy(neighbor, cpos);
+               
+               if (!visited[neighbor]) {
+                  stack.Add(cell);
+                  
+                  if (yy == ny) {
+                     if (nx < xx) {
+                        noWallLeft[cell] = true;
+                     } else {
+                        noWallLeft[neighbor] = true;
+                     }
+                  } else {
+                     if (ny < yy) {
+                        noWallAbove[cell] = true;
+                     } else {
+                        noWallAbove[neighbor] = true;
+                     }
+                  }
+                  
+                  stack.Add(neighbor);
+                  break;
+               }
             }
-            public bool turnsPossible()
-            {
-                return (isWall(X, Y + 2) || isWall(X, Y - 2) || isWall(X + 2, Y) || isWall(X - 2, Y));
-                
+         }
+         
+         for (ushort y2 = 0; y2 <= cpos.h; y2++) {
+            for (ushort x2 = 0; x2 <= cpos.w; x2++) {
+               ushort cell = id(x2, y2, cpos);
+               if (!noWallLeft[cell] && y2 < cpos.h) {
+                  BufferAdd(buffer, (ushort)(x + (x2 * 2 - 1)), y, (ushort)(z + (y2 * 2)));
+                  BufferAdd(buffer, (ushort)(x + (x2 * 2 - 1)), (ushort)(y + 1), (ushort)(z + (y2 * 2)));
+               }
+               if (!noWallAbove[cell] && x2 < cpos.w) {
+                  BufferAdd(buffer, (ushort)(x + (x2 * 2)), y, (ushort)(z + (y2 * 2 - 1)));
+                  BufferAdd(buffer, (ushort)(x + (x2 * 2)), (ushort)(y + 1), (ushort)(z + (y2 * 2 - 1)));
+               }
+               BufferAdd(buffer, (ushort)(x + (x2 * 2 - 1)), y, (ushort)(z + (y2 * 2 - 1)));
+               BufferAdd(buffer, (ushort)(x + (x2 * 2 - 1)), (ushort)(y + 1), (ushort)(z + (y2 * 2 - 1)));
             }
+         }
 
-            private bool isWall(int x, int y)
+         // Check to see if user is subject to anti-tunneling
+         // This code won't compile for some reason
+         /*if (Server.antiTunnel && p.group.Permission == LevelPermission.Guest && !p.ignoreGrief)
+         {
+            int CheckForBlocksBelowY = p.level.depth / 2 - Server.maxDepth;
+            if (buffer.Any(pos => pos.y < CheckForBlocksBelowY))
             {
-                try
-                {
-                    return wall[x, y];
-                }
-                catch (IndexOutOfRangeException)
-                {
-                    return false;
-                }
+               p.SendMessage("You're not allowed to build this far down!");
+               return;
             }
-            public GridNode(ushort x, ushort y) {
-                X = x;
-                Y = y;
-            }
-        }
-    }
+         }*/
 
+         if (Server.forceCuboid)
+         {
+            int counter = 1;
+            buffer.ForEach(delegate(Pos pos)
+            {
+               if (counter <= p.group.maxBlocks)
+               {
+                  counter++;
+                  p.level.Blockchange(p, pos.x, pos.y, pos.z, type);
+               }
+            });
+            if (counter >= p.group.maxBlocks)
+            {
+               Player.SendMessage(p, "Tried to cuboid " + buffer.Count + " blocks, but your limit is " + p.group.maxBlocks + ".");
+               Player.SendMessage(p, "Executed cuboid up to limit.");
+            }
+            else
+            {
+               Player.SendMessage(p, buffer.Count.ToString() + " blocks.");
+            }
+            if (p.staticCommands) p.Blockchange += new Player.BlockchangeEventHandler(Blockchange1);
+            return;
+         }
+
+         if (buffer.Count > p.group.maxBlocks)
+         {
+            Player.SendMessage(p, "You tried to cuboid " + buffer.Count + " blocks.");
+            Player.SendMessage(p, "You cannot cuboid more than " + p.group.maxBlocks + ".");
+            return;
+         }
+
+         Player.SendMessage(p, buffer.Count.ToString() + " blocks.");
+
+         buffer.ForEach(delegate(Pos pos)
+         {
+            p.level.Blockchange(p, pos.x, pos.y, pos.z, type);
+         });
+         
+         Player.SendMessage(p, "Maze completed!");
+
+         if (p.staticCommands) p.Blockchange += new Player.BlockchangeEventHandler(Blockchange1);
+      }
+      
+      void BufferAdd(List<Pos> list, ushort x, ushort y, ushort z)
+      {
+         Pos pos; pos.x = x; pos.y = y; pos.z = z; list.Add(pos);
+      }
+      
+      ushort id(int x, int y, CatchPos cpos)
+      {
+         return (ushort)(y * (cpos.w + 1) + x);
+      }
+
+      ushort dx(ushort i, CatchPos cpos)
+      {
+         return (ushort)(i % (cpos.w + 1));
+      }
+
+      ushort dy(ushort i, CatchPos cpos)
+      {
+         return (ushort)Math.Floor((decimal)(i / (cpos.w + 1)));
+      }
+
+      void shuffle<T>(List<T> list)
+      {
+         Random rng = new Random();
+         int n = list.Count;
+         while (n > 0) {
+            n--;
+            int k = rng.Next(n + 1);
+            T value = list[k];
+            list[k] = list[n];
+            list[n] = value;
+         }
+      }
+      
+      T pop<T>(List<T> list)
+      {
+         int lastIndex = list.Count - 1; 
+         T temp = list[lastIndex];
+         list.RemoveAt(lastIndex);
+         return temp;
+      }
+      
+      struct Pos
+      {
+         public ushort x, y, z;
+      }
+      
+      struct CatchPos
+      {
+         public byte type;
+         public ushort w, h;
+      }
+   }
+   
+   
+}
     
